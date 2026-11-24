@@ -1,0 +1,277 @@
+// Observatório - Prisma Schema
+// Multi-tenant SaaS platform for editorial management
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  SYSTEM    // Super-admin global
+  ADMIN     // Admin da organização
+  VALIDATOR // Validador de publicações
+  USER      // Usuário comum
+}
+
+enum PublicationStatus {
+  DRAFT               // Rascunho
+  PENDING_REVIEW      // Aguardando revisão
+  CORRECTION_REQUESTED // Correção solicitada
+  APPROVED            // Aprovado
+  REJECTED            // Rejeitado
+  SCHEDULED           // Agendado
+  PUBLISHED           // Publicado
+  ARCHIVED            // Arquivado
+}
+
+// ============================================================================
+// MODELS
+// ============================================================================
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  domain      String?  @unique
+  avatar      String?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  users        User[]
+  publications Publication[]
+  categories   Category[]
+  tags         Tag[]
+  uploads      Upload[]
+
+  @@index([slug])
+  @@index([isActive])
+}
+
+model User {
+  id             String    @id @default(cuid())
+  organizationId String?
+  name           String
+  email          String    @unique
+  password       String
+  role           UserRole  @default(USER)
+  emailVerified  DateTime?
+  avatar         String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relations
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publications Publication[]
+  comments     Comment[]
+  likes        Like[]
+  auditLogs    AuditLog[]
+  uploads      Upload[]
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([role])
+}
+
+model Publication {
+  id             String            @id @default(cuid())
+  organizationId String
+  authorId       String
+  title          String
+  slug           String
+  excerpt        String?
+  content        String
+  coverImage     String?
+  status         PublicationStatus @default(DRAFT)
+  publishedAt    DateTime?
+  scheduledAt    DateTime?
+  seoTitle       String?
+  seoDescription String?
+  viewCount      Int               @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  deletedAt      DateTime?
+
+  // Relations
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  author       User                       @relation(fields: [authorId], references: [id])
+  categories   CategoriesOnPublications[]
+  tags         TagsOnPublications[]
+  comments     Comment[]
+  likes        Like[]
+  auditLogs    AuditLog[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, status])
+  @@index([publishedAt])
+  @@index([authorId])
+  @@index([deletedAt])
+}
+
+model Category {
+  id             String   @id @default(cuid())
+  organizationId String
+  parentId       String?
+  name           String
+  slug           String
+  description    String?
+  order          Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  organization Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       Category?                  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children     Category[]                 @relation("CategoryHierarchy")
+  publications CategoriesOnPublications[]
+
+  @@unique([organizationId, slug])
+  @@index([parentId])
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  createdAt      DateTime @default(now())
+
+  // Relations
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publications TagsOnPublications[]
+
+  @@unique([organizationId, slug])
+}
+
+model Comment {
+  id            String   @id @default(cuid())
+  publicationId String
+  authorId      String
+  parentId      String?
+  content       String
+  isApproved    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id])
+  parent      Comment?    @relation("CommentReplies", fields: [parentId], references: [id])
+  replies     Comment[]   @relation("CommentReplies")
+
+  @@index([publicationId])
+  @@index([authorId])
+  @@index([isApproved])
+}
+
+model Like {
+  id            String   @id @default(cuid())
+  publicationId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  // Relations
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@unique([publicationId, userId])
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  publicationId  String
+  userId         String
+  action         String
+  previousStatus String?
+  newStatus      String?
+  observation    String?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@index([publicationId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Upload {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  filename       String
+  originalName   String
+  mimeType       String
+  size           Int
+  url            String
+  createdAt      DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+}
+
+// ============================================================================
+// JUNCTION TABLES
+// ============================================================================
+
+model CategoriesOnPublications {
+  publicationId String
+  categoryId    String
+
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([publicationId, categoryId])
+}
+
+model TagsOnPublications {
+  publicationId String
+  tagId         String
+
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+  tag         Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([publicationId, tagId])
+}
+
+// ============================================================================
+// AUTH TOKENS
+// ============================================================================
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([token])
+}
